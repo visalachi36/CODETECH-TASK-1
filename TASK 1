@@ -1,0 +1,127 @@
+import peewee
+from peewee import *
+
+# Define a SQLite database
+db = peewee.SqliteDatabase('library.db')
+
+# Define base model for all tables
+class BaseModel(Model):
+    class Meta:
+        database = db
+
+# Define the Book model
+class Book(BaseModel):
+    title = CharField()
+    author = CharField()
+    publication = CharField()
+    pub_year = IntegerField()
+    isbn = CharField(unique=True)
+    num_of_books = IntegerField(default=1)
+
+# Define the Member model
+class Member(BaseModel):
+    user_id = CharField(unique=True)
+    name = CharField()
+    phone_no = CharField()
+
+# Define the IssueHistory model
+class IssueHistory(BaseModel):
+    member = ForeignKeyField(Member, backref='issues')
+    book = ForeignKeyField(Book, backref='issues')
+    issue_date = DateField()
+    return_date = DateField(null=True)
+    current_status = CharField(default='issued')
+
+# Connect to the database and create tables if they don't exist
+db.connect()
+db.create_tables([Book, Member, IssueHistory])
+
+# Function to add a book
+def add_book(title, author, publication, pub_year, isbn, num_of_books=1):
+    try:
+        Book.create(title=title, author=author, publication=publication,
+                    pub_year=pub_year, isbn=isbn, num_of_books=num_of_books)
+        print(f'Book "{title}" added successfully.')
+    except peewee.IntegrityError:
+        print(f'Book with ISBN {isbn} already exists.')
+
+# Function to add a member
+def add_member(user_id, name, phone_no):
+    try:
+        Member.create(user_id=user_id, name=name, phone_no=phone_no)
+        print(f'Member "{name}" added successfully.')
+    except peewee.IntegrityError:
+        print(f'Member with user ID {user_id} already exists.')
+
+# Function to allocate a book to a member
+def allocate_book(member_id, book_isbn, issue_date, return_date):
+    member = Member.get_or_none(Member.user_id == member_id)
+    book = Book.get_or_none(Book.isbn == book_isbn)
+
+    if not member:
+        print(f'Member with user ID {member_id} does not exist.')
+        return
+    if not book:
+        print(f'Book with ISBN {book_isbn} does not exist.')
+        return
+    if book.num_of_books <= 0:
+        print(f'No more copies of book "{book.title}" available.')
+        return
+
+    # Decrease number of available books
+    book.num_of_books -= 1
+    book.save()
+
+    # Create issue record
+    IssueHistory.create(member=member, book=book, issue_date=issue_date,
+                        return_date=return_date, current_status='issued')
+    print(f'Book "{book.title}" allocated to member "{member.name}".')
+
+# Function to return a book
+def return_book(issue_id, return_date):
+    issue = IssueHistory.get_or_none(IssueHistory.issue_id == issue_id)
+
+    if not issue:
+        print(f'Issue ID {issue_id} does not exist.')
+        return
+
+    # Update issue record
+    issue.return_date = return_date
+    issue.current_status = 'returned'
+    issue.save()
+
+    # Increase number of available books
+    issue.book.num_of_books += 1
+    issue.book.save()
+
+    print(f'Book "{issue.book.title}" returned successfully.')
+
+# Function to remove a member
+def remove_member(user_id):
+    member = Member.get_or_none(Member.user_id == user_id)
+
+    if not member:
+        print(f'Member with user ID {user_id} does not exist.')
+        return
+
+    # Delete member (cascading delete on related issue history records)
+    member.delete_instance(recursive=True)
+    print(f'Member "{member.name}" removed successfully.')
+
+# Example usage:
+if _name_ == '_main_':
+    # Add books and members (example)
+    add_book('Python Programming', 'John Doe', 'XYZ Publications', 2023, '978-1234567890', 5)
+    add_book('Data Science Essentials', 'Jane Smith', 'ABC Books', 2022, '978-0987654321', 3)
+    add_member('1001', 'Alice', '123-456-7890')
+    add_member('1002', 'Bob', '987-654-3210')
+
+    # Allocate and return books (example)
+    allocate_book('1001', '978-1234567890', '2023-07-01', '2023-07-15')
+    return_book('2023-07-01_1001_2023-07-15', '2023-07-15')
+
+    # Remove a member (example)
+    remove_member('1002')
+
+    # Close database connection
+    db.close()
